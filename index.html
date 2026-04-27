@@ -276,30 +276,32 @@ async function autoCropAndShrink(file) {
     (top[2] + bot[2] + left[2] + right[2]) / 4
   ];
 
-  const THRESH = 60;
+  const THRESH = 110;
   const isFg = (i) => colorDist(data[i], data[i+1], data[i+2], bg[0], bg[1], bg[2]) > THRESH;
 
   const step = Math.max(1, Math.floor(Math.min(W, H) / 400));
-  let minX = W, minY = H, maxX = 0, maxY = 0, found = false;
+  const colCount = new Array(W).fill(0);
+  const rowCount = new Array(H).fill(0);
+  let total = 0;
   for (let y = 0; y < H; y += step) {
     for (let x = 0; x < W; x += step) {
       const i = (y * W + x) * 4;
-      if (isFg(i)) {
-        if (x < minX) minX = x;
-        if (y < minY) minY = y;
-        if (x > maxX) maxX = x;
-        if (y > maxY) maxY = y;
-        found = true;
-      }
+      if (isFg(i)) { colCount[x]++; rowCount[y]++; total++; }
     }
   }
+  if (total < 50) return file;
 
-  if (!found) return file;
+  const colThresh = Math.max(2, Math.floor((H / step) * 0.10));
+  const rowThresh = Math.max(2, Math.floor((W / step) * 0.10));
+  let minX = -1, maxX = -1, minY = -1, maxY = -1;
+  for (let x = 0; x < W; x++) if (colCount[x] >= colThresh) { if (minX < 0) minX = x; maxX = x; }
+  for (let y = 0; y < H; y++) if (rowCount[y] >= rowThresh) { if (minY < 0) minY = y; maxY = y; }
+  if (minX < 0 || minY < 0) return file;
+
   const cw = maxX - minX, ch = maxY - minY;
   if (cw < W * 0.2 || ch < H * 0.2) return file;
-  if (cw > W * 0.97 && ch > H * 0.97) {} // already tight, just resize
 
-  const pad = Math.round(Math.min(cw, ch) * 0.04);
+  const pad = Math.round(Math.min(cw, ch) * 0.02);
   const cropX = Math.max(0, minX - pad);
   const cropY = Math.max(0, minY - pad);
   const cropW = Math.min(W - cropX, cw + pad * 2);
