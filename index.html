@@ -170,7 +170,9 @@ button.big {
 <script>
 const IMGBB_KEY = 'cdcdc321c7372c67b90c78ccf2b530ee';
 const IMGBB_URL = 'https://api.imgbb.com/1/upload';
-const LITTERBOX_URL = 'https://litterbox.catbox.moe/resources/internals/api.php';
+const JSONBIN_KEY = '$2a$10$suOYNOHFjj96MZ1lVznrMepa7/VPjNIDH3hKJ1Z7BP4Vyss.kHxve';
+const JSONBIN_BIN_ID = '69ef399636566621a8f7f21b';
+const JSONBIN_URL = 'https://api.jsonbin.io/v3/b/' + JSONBIN_BIN_ID;
 const KEY = 'cardLister.v1';
 
 let state = JSON.parse(localStorage.getItem(KEY) || 'null') || {
@@ -335,16 +337,20 @@ async function uploadImage(file) {
   return data.data.url;
 }
 
-async function uploadJSON(file) {
-  const fd = new FormData();
-  fd.append('reqtype', 'fileupload');
-  fd.append('time', '72h');
-  fd.append('fileToUpload', file);
-  const resp = await fetch(LITTERBOX_URL, { method: 'POST', body: fd });
-  if (!resp.ok) throw new Error('Litterbox HTTP ' + resp.status);
-  const text = (await resp.text()).trim();
-  if (!text.startsWith('http')) throw new Error('Litterbox: ' + text);
-  return text;
+async function putToJsonBin(data) {
+  const resp = await fetch(JSONBIN_URL, {
+    method: 'PUT',
+    headers: {
+      'Content-Type': 'application/json',
+      'X-Master-Key': JSONBIN_KEY
+    },
+    body: JSON.stringify(data)
+  });
+  if (!resp.ok) {
+    let msg = 'JSONBin HTTP ' + resp.status;
+    try { const j = await resp.json(); if (j.message) msg += ': ' + j.message; } catch (e) {}
+    throw new Error(msg);
+  }
 }
 
 let pendingType = null;
@@ -400,7 +406,16 @@ document.getElementById('set-location').addEventListener('click', () => {
 
 function showOverlay(msg, url) {
   document.getElementById('overlay-msg').textContent = msg;
-  document.getElementById('overlay-url').textContent = url;
+  const urlEl = document.getElementById('overlay-url');
+  const copyBtn = document.getElementById('overlay-copy');
+  if (url) {
+    urlEl.textContent = url;
+    urlEl.style.display = '';
+    copyBtn.style.display = '';
+  } else {
+    urlEl.style.display = 'none';
+    copyBtn.style.display = 'none';
+  }
   document.getElementById('overlay').classList.add('show');
 }
 
@@ -423,18 +438,15 @@ document.getElementById('export-btn').addEventListener('click', async () => {
     alert('No cards saved yet. Save at least one card first.');
     return;
   }
-  document.getElementById('status').textContent = 'Exporting ' + state.cards.length + ' cards...';
-  const json = JSON.stringify({
-    exportedAt: new Date().toISOString(),
-    cards: state.cards
-  }, null, 2);
-  const blob = new Blob([json], { type: 'application/json' });
-  const file = new File([blob], 'cards_' + Date.now() + '.json', { type: 'application/json' });
+  document.getElementById('status').textContent = 'Sending ' + state.cards.length + ' cards to Claude...';
   try {
-    const url = await uploadJSON(file);
-    showOverlay('Send this URL to Claude (link expires in 72h, photos do not):', url);
+    await putToJsonBin({
+      exportedAt: new Date().toISOString(),
+      cards: state.cards
+    });
+    showOverlay('Sent ' + state.cards.length + ' cards. Just tell Claude "go" on your computer.', '');
   } catch (err) {
-    alert('Export failed: ' + err.message);
+    alert('Send failed: ' + err.message);
   }
   render();
 });
