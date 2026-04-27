@@ -1,0 +1,349 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black">
+<meta name="apple-mobile-web-app-title" content="Cards">
+<title>Card Lister</title>
+<style>
+* { box-sizing: border-box; margin: 0; padding: 0; -webkit-tap-highlight-color: transparent; -webkit-touch-callout: none; }
+html, body { height: 100%; }
+body {
+  font-family: -apple-system, system-ui, sans-serif;
+  background: #1a1a1a;
+  color: #fff;
+  display: flex;
+  flex-direction: column;
+  padding: env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left);
+  user-select: none;
+  -webkit-user-select: none;
+}
+#header {
+  background: #000;
+  padding: 14px 16px;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  border-bottom: 1px solid #333;
+  gap: 8px;
+}
+#batch-info { font-size: 15px; }
+#batch-loc { font-weight: bold; color: #4a9eff; }
+#count-info { font-size: 13px; color: #888; }
+#set-location {
+  background: #333; color: #fff; border: none;
+  padding: 8px 14px; border-radius: 6px; font-size: 14px;
+}
+#main {
+  flex: 1; padding: 16px;
+  display: flex; flex-direction: column; gap: 12px;
+  overflow-y: auto;
+}
+#card-counter { font-size: 38px; text-align: center; margin: 8px 0 0; }
+#status {
+  text-align: center; font-size: 15px;
+  color: #aaa; min-height: 22px;
+}
+#thumbs {
+  display: flex; gap: 8px; justify-content: center;
+  flex-wrap: wrap; min-height: 64px; padding: 4px;
+}
+.thumb {
+  position: relative; width: 64px; height: 64px;
+}
+.thumb img {
+  width: 100%; height: 100%; object-fit: cover;
+  border-radius: 6px; border: 1px solid #333;
+}
+.thumb .label {
+  position: absolute; bottom: 2px; left: 2px;
+  background: rgba(0,0,0,0.7); color: #fff;
+  font-size: 9px; padding: 1px 4px; border-radius: 3px;
+}
+.thumb .x {
+  position: absolute; top: -6px; right: -6px;
+  width: 20px; height: 20px; border-radius: 50%;
+  background: #d33; color: #fff; font-size: 14px;
+  display: flex; align-items: center; justify-content: center;
+  border: 2px solid #1a1a1a;
+}
+button.big {
+  font-size: 26px; font-weight: bold;
+  padding: 22px; border: none; border-radius: 12px;
+  color: #fff; cursor: pointer;
+}
+#front-btn { background: #2563eb; }
+#front-btn.done { background: #1e3a5f; opacity: 0.5; }
+#back-btn { background: #7c3aed; }
+#back-btn.done { background: #3a225f; opacity: 0.5; }
+#extra-btn {
+  background: #444; color: #fff;
+  font-size: 15px; padding: 12px;
+  border: none; border-radius: 8px;
+}
+#done-btn {
+  background: #16a34a; color: #fff;
+  font-size: 22px; font-weight: bold;
+  padding: 20px; border: none; border-radius: 12px;
+  margin-top: 6px;
+}
+#done-btn:disabled { background: #333; color: #666; }
+#footer {
+  display: flex; gap: 8px;
+  padding: 12px;
+  background: #000; border-top: 1px solid #333;
+}
+#export-btn, #reset-btn {
+  flex: 1; color: #fff;
+  border: none; padding: 14px;
+  border-radius: 8px; font-size: 15px;
+}
+#export-btn { background: #d97706; }
+#reset-btn { background: #333; }
+#overlay {
+  position: fixed; inset: 0;
+  background: rgba(0,0,0,0.85);
+  display: none; align-items: center; justify-content: center;
+  z-index: 100; padding: 20px;
+}
+#overlay.show { display: flex; }
+#overlay-box {
+  background: #222; border-radius: 12px;
+  padding: 20px; max-width: 100%; width: 100%;
+  display: flex; flex-direction: column; gap: 12px;
+}
+#overlay-msg { font-size: 16px; }
+#overlay-url {
+  background: #000; padding: 12px; border-radius: 6px;
+  font-family: ui-monospace, monospace; font-size: 13px;
+  word-break: break-all; user-select: text; -webkit-user-select: text;
+}
+#overlay-actions { display: flex; gap: 8px; }
+#overlay-actions button {
+  flex: 1; padding: 12px; border: none; border-radius: 8px;
+  font-size: 14px; color: #fff;
+}
+.btn-primary { background: #2563eb; }
+.btn-secondary { background: #444; }
+</style>
+</head>
+<body>
+
+<div id="header">
+  <div>
+    <div id="batch-info">Batch: <span id="batch-loc">none</span></div>
+    <div id="count-info"><span id="cards-done">0</span> cards saved</div>
+  </div>
+  <button id="set-location">Set Location</button>
+</div>
+
+<div id="main">
+  <h1 id="card-counter">Card 1</h1>
+  <div id="status">Tap FRONT to start</div>
+  <div id="thumbs"></div>
+  <button id="front-btn" class="big">FRONT</button>
+  <button id="back-btn" class="big">BACK</button>
+  <button id="extra-btn">+ Add Extra Photo</button>
+  <button id="done-btn" disabled>Save Card &amp; Next</button>
+</div>
+
+<div id="footer">
+  <button id="export-btn">Export to URL</button>
+  <button id="reset-btn">Reset</button>
+</div>
+
+<input type="file" id="file-input" accept="image/*" capture="environment" style="display:none">
+
+<div id="overlay">
+  <div id="overlay-box">
+    <div id="overlay-msg"></div>
+    <div id="overlay-url"></div>
+    <div id="overlay-actions">
+      <button class="btn-primary" id="overlay-copy">Copy</button>
+      <button class="btn-secondary" id="overlay-close">Close</button>
+    </div>
+  </div>
+</div>
+
+<script>
+const API = 'https://catbox.moe/user/api.php';
+const KEY = 'cardLister.v1';
+
+let state = JSON.parse(localStorage.getItem(KEY) || 'null') || {
+  batch: '',
+  cards: [],
+  current: { photos: [] }
+};
+
+function save() { localStorage.setItem(KEY, JSON.stringify(state)); }
+
+function render() {
+  document.getElementById('card-counter').textContent = 'Card ' + (state.cards.length + 1);
+  document.getElementById('batch-loc').textContent = state.batch || 'none';
+  document.getElementById('cards-done').textContent = state.cards.length;
+
+  const photos = state.current.photos;
+  const haveFront = photos.some(p => p.type === 'front');
+  const haveBack = photos.some(p => p.type === 'back');
+
+  let status;
+  if (!haveFront) status = 'Tap FRONT to start';
+  else if (!haveBack) status = 'Tap BACK';
+  else status = photos.length + ' photos. Add extras or save.';
+  document.getElementById('status').textContent = status;
+
+  const front = document.getElementById('front-btn');
+  front.classList.toggle('done', haveFront);
+  front.textContent = haveFront ? 'FRONT (re-shoot)' : 'FRONT';
+  const back = document.getElementById('back-btn');
+  back.classList.toggle('done', haveBack);
+  back.textContent = haveBack ? 'BACK (re-shoot)' : 'BACK';
+
+  document.getElementById('done-btn').disabled = !(haveFront && haveBack);
+
+  const thumbsEl = document.getElementById('thumbs');
+  thumbsEl.innerHTML = '';
+  photos.forEach((p, i) => {
+    const wrap = document.createElement('div');
+    wrap.className = 'thumb';
+    const img = document.createElement('img');
+    img.src = p.url;
+    wrap.appendChild(img);
+    const label = document.createElement('div');
+    label.className = 'label';
+    label.textContent = p.type;
+    wrap.appendChild(label);
+    const x = document.createElement('div');
+    x.className = 'x';
+    x.textContent = '×';
+    x.addEventListener('click', () => {
+      photos.splice(i, 1);
+      save(); render();
+    });
+    wrap.appendChild(x);
+    thumbsEl.appendChild(wrap);
+  });
+}
+
+async function uploadToCatbox(file) {
+  const fd = new FormData();
+  fd.append('reqtype', 'fileupload');
+  fd.append('fileToUpload', file);
+  const resp = await fetch(API, { method: 'POST', body: fd });
+  if (!resp.ok) throw new Error('Catbox HTTP ' + resp.status);
+  const text = (await resp.text()).trim();
+  if (!text.startsWith('http')) throw new Error('Catbox: ' + text);
+  return text;
+}
+
+let pendingType = null;
+
+function shoot(type) {
+  pendingType = type;
+  document.getElementById('file-input').click();
+}
+
+document.getElementById('front-btn').addEventListener('click', () => shoot('front'));
+document.getElementById('back-btn').addEventListener('click', () => shoot('back'));
+document.getElementById('extra-btn').addEventListener('click', () => shoot('extra'));
+
+document.getElementById('file-input').addEventListener('change', async (e) => {
+  const file = e.target.files[0];
+  if (!file) return;
+  const oldStatus = document.getElementById('status').textContent;
+  document.getElementById('status').textContent = 'Uploading ' + pendingType + '...';
+  try {
+    const url = await uploadToCatbox(file);
+    if (pendingType === 'front' || pendingType === 'back') {
+      state.current.photos = state.current.photos.filter(p => p.type !== pendingType);
+    }
+    state.current.photos.push({ type: pendingType, url });
+    save();
+    render();
+  } catch (err) {
+    alert('Upload failed: ' + err.message);
+    document.getElementById('status').textContent = oldStatus;
+  }
+  e.target.value = '';
+});
+
+document.getElementById('done-btn').addEventListener('click', () => {
+  state.cards.push({
+    id: state.cards.length + 1,
+    location: state.batch,
+    timestamp: new Date().toISOString(),
+    photos: state.current.photos
+  });
+  state.current = { photos: [] };
+  save();
+  render();
+});
+
+document.getElementById('set-location').addEventListener('click', () => {
+  const loc = prompt('Batch location (e.g. F7, 8B). Applies to every new card until you change it:', state.batch || '');
+  if (loc !== null) {
+    state.batch = loc.trim();
+    save(); render();
+  }
+});
+
+function showOverlay(msg, url) {
+  document.getElementById('overlay-msg').textContent = msg;
+  document.getElementById('overlay-url').textContent = url;
+  document.getElementById('overlay').classList.add('show');
+}
+
+document.getElementById('overlay-close').addEventListener('click', () => {
+  document.getElementById('overlay').classList.remove('show');
+});
+document.getElementById('overlay-copy').addEventListener('click', async () => {
+  const url = document.getElementById('overlay-url').textContent;
+  try {
+    await navigator.clipboard.writeText(url);
+    document.getElementById('overlay-copy').textContent = 'Copied!';
+    setTimeout(() => { document.getElementById('overlay-copy').textContent = 'Copy'; }, 1500);
+  } catch (err) {
+    alert('Copy failed. Long-press the URL to select, then copy.');
+  }
+});
+
+document.getElementById('export-btn').addEventListener('click', async () => {
+  if (state.cards.length === 0) {
+    alert('No cards saved yet. Save at least one card first.');
+    return;
+  }
+  document.getElementById('status').textContent = 'Exporting ' + state.cards.length + ' cards...';
+  const json = JSON.stringify({
+    exportedAt: new Date().toISOString(),
+    cards: state.cards
+  }, null, 2);
+  const blob = new Blob([json], { type: 'application/json' });
+  const file = new File([blob], 'cards_' + Date.now() + '.json', { type: 'application/json' });
+  try {
+    const url = await uploadToCatbox(file);
+    showOverlay('Send this URL to Claude:', url);
+  } catch (err) {
+    alert('Export failed: ' + err.message);
+  }
+  render();
+});
+
+document.getElementById('reset-btn').addEventListener('click', () => {
+  if (state.cards.length === 0 && state.current.photos.length === 0) {
+    alert('Nothing to reset.');
+    return;
+  }
+  const msg = 'Clear ' + state.cards.length + ' saved cards from this device? (Photos already on Catbox stay safe. Export first if you want a copy.)';
+  if (confirm(msg)) {
+    const keepBatch = state.batch;
+    state = { batch: keepBatch, cards: [], current: { photos: [] } };
+    save(); render();
+  }
+});
+
+render();
+</script>
+</body>
+</html>
