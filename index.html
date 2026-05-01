@@ -327,9 +327,8 @@ async function autoCropAndShrink(file) {
 }
 
 async function uploadImage(file) {
-  const processed = await autoCropAndShrink(file);
   const fd = new FormData();
-  fd.append('image', processed);
+  fd.append('image', file);
   const resp = await fetch(IMGBB_URL + '?key=' + IMGBB_KEY, { method: 'POST', body: fd });
   if (!resp.ok) throw new Error('ImgBB HTTP ' + resp.status);
   const data = await resp.json();
