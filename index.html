@@ -183,6 +183,12 @@ let state = JSON.parse(localStorage.getItem(KEY) || 'null') || {
 
 function save() { localStorage.setItem(KEY, JSON.stringify(state)); }
 
+function clearSubmittedBatch() {
+  const keepBatch = state.batch;
+  state = { batch: keepBatch, cards: [], current: { photos: [] } };
+  save();
+}
+
 function render() {
   document.getElementById('card-counter').textContent = 'Card ' + (state.cards.length + 1);
   document.getElementById('batch-loc').textContent = state.batch || 'none';
@@ -350,6 +356,17 @@ async function putToJsonBin(data) {
     try { const j = await resp.json(); if (j.message) msg += ': ' + j.message; } catch (e) {}
     throw new Error(msg);
   }
+  return await resp.json();
+}
+
+function validateSubmitReceipt(receipt, cardCount) {
+  const eventId = receipt && (receipt.eventId || receipt.event_id);
+  const returnedCount = receipt && (receipt.cardCount || receipt.card_count);
+  const status = receipt && receipt.status;
+  if (!eventId || Number(returnedCount) !== cardCount || !['queued', 'stored'].includes(status)) {
+    throw new Error('Invalid submit receipt');
+  }
+  return { eventId, cardCount: Number(returnedCount), status };
 }
 
 let pendingType = null;
@@ -437,15 +454,16 @@ document.getElementById('export-btn').addEventListener('click', async () => {
     alert('No cards saved yet. Save at least one card first.');
     return;
   }
-  document.getElementById('status').textContent = 'Sending ' + state.cards.length + ' cards to Claude...';
+  document.getElementById('status').textContent = 'Sending ' + state.cards.length + ' cards...';
   try {
-    await putToJsonBin({
+    const receipt = validateSubmitReceipt(await putToJsonBin({
       exportedAt: new Date().toISOString(),
       cards: state.cards
-    });
-    showOverlay('Sent ' + state.cards.length + ' cards. Just tell Claude "go" on your computer.', '');
+    }), state.cards.length);
+    clearSubmittedBatch();
+    showOverlay('Batch stored. Event ' + receipt.eventId + ' is queued for processing. Receipt sent for ' + receipt.cardCount + ' cards.', '');
   } catch (err) {
-    alert('Send failed: ' + err.message);
+    alert('Submit failed: ' + err.message);
   }
   render();
 });
@@ -457,9 +475,8 @@ document.getElementById('reset-btn').addEventListener('click', () => {
   }
   const msg = 'Clear ' + state.cards.length + ' saved cards from this device? (Photos already on ImgBB stay safe. Export first if you want a copy.)';
   if (confirm(msg)) {
-    const keepBatch = state.batch;
-    state = { batch: keepBatch, cards: [], current: { photos: [] } };
-    save(); render();
+    clearSubmittedBatch();
+    render();
   }
 });
 
