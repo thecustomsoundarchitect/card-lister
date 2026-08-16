@@ -150,7 +150,7 @@ button.big {
 </div>
 
 <div id="footer">
-  <button id="export-btn">Export to URL</button>
+  <button id="export-btn">Submit</button>
   <button id="reset-btn">Reset</button>
 </div>
 
@@ -168,12 +168,8 @@ button.big {
 </div>
 
 <script>
-const IMGBB_KEY = 'cdcdc321c7372c67b90c78ccf2b530ee';
-const IMGBB_URL = 'https://api.imgbb.com/1/upload';
-const JSONBIN_KEY = '$2a$10$suOYNOHFjj96MZ1lVznrMepa7/VPjNIDH3hKJ1Z7BP4Vyss.kHxve';
-const JSONBIN_BIN_ID = '69ef399636566621a8f7f21b';
-const JSONBIN_URL = 'https://api.jsonbin.io/v3/b/' + JSONBIN_BIN_ID;
 const KEY = 'cardLister.v1';
+const CONNECTION_KEY = 'cardLister.connection.v1';
 
 let state = JSON.parse(localStorage.getItem(KEY) || 'null') || {
   batch: '',
@@ -182,6 +178,29 @@ let state = JSON.parse(localStorage.getItem(KEY) || 'null') || {
 };
 
 function save() { localStorage.setItem(KEY, JSON.stringify(state)); }
+
+function secureConnection() {
+  let connection;
+  try {
+    connection = JSON.parse(localStorage.getItem(CONNECTION_KEY) || 'null');
+  } catch (e) {
+    connection = null;
+  }
+  const baseUrl = String(connection && connection.baseUrl || '').trim().replace(/\/+$/, '');
+  const token = String(connection && connection.token || '').trim();
+  if (!/^https:\/\//i.test(baseUrl) || !token) {
+    throw new Error('Phone connection is not configured. Your saved cards and photos are still here.');
+  }
+  return { baseUrl, token };
+}
+
+async function apiRequest(path, options) {
+  const connection = secureConnection();
+  const headers = Object.assign({}, options && options.headers || {}, {
+    Authorization: 'Bearer ' + connection.token
+  });
+  return fetch(connection.baseUrl + path, Object.assign({}, options || {}, { headers }));
+}
 
 function clearSubmittedBatch() {
   const keepBatch = state.batch;
@@ -335,25 +354,24 @@ async function autoCropAndShrink(file) {
 async function uploadImage(file) {
   const fd = new FormData();
   fd.append('image', file);
-  const resp = await fetch(IMGBB_URL + '?key=' + IMGBB_KEY, { method: 'POST', body: fd });
-  if (!resp.ok) throw new Error('ImgBB HTTP ' + resp.status);
+  const resp = await apiRequest('/v1/photos', { method: 'POST', body: fd });
+  if (!resp.ok) throw new Error('Photo service HTTP ' + resp.status);
   const data = await resp.json();
-  if (!data.success) throw new Error('ImgBB: ' + (data.error && data.error.message ? data.error.message : 'unknown'));
-  return data.data.url;
+  if (!data.url) throw new Error(data.error || 'Photo service returned no URL');
+  return data.url;
 }
 
-async function putToJsonBin(data) {
-  const resp = await fetch(JSONBIN_URL, {
-    method: 'PUT',
+async function submitBatch(data) {
+  const resp = await apiRequest('/v1/submissions', {
+    method: 'POST',
     headers: {
-      'Content-Type': 'application/json',
-      'X-Master-Key': JSONBIN_KEY
+      'Content-Type': 'application/json'
     },
     body: JSON.stringify(data)
   });
   if (!resp.ok) {
-    let msg = 'JSONBin HTTP ' + resp.status;
-    try { const j = await resp.json(); if (j.message) msg += ': ' + j.message; } catch (e) {}
+    let msg = 'Submit service HTTP ' + resp.status;
+    try { const j = await resp.json(); if (j.error) msg += ': ' + j.error; } catch (e) {}
     throw new Error(msg);
   }
   return await resp.json();
@@ -366,7 +384,12 @@ function validateSubmitReceipt(receipt, cardCount) {
   if (!eventId || Number(returnedCount) !== cardCount || !['queued', 'stored'].includes(status)) {
     throw new Error('Invalid submit receipt');
   }
-  return { eventId, cardCount: Number(returnedCount), status };
+  return {
+    eventId,
+    cardCount: Number(returnedCount),
+    status,
+    receiptEmail: receipt.receiptEmail || receipt.receipt_email || 'sent'
+  };
 }
 
 let pendingType = null;
@@ -456,12 +479,18 @@ document.getElementById('export-btn').addEventListener('click', async () => {
   }
   document.getElementById('status').textContent = 'Sending ' + state.cards.length + ' cards...';
   try {
-    const receipt = validateSubmitReceipt(await putToJsonBin({
+    const receipt = validateSubmitReceipt(await submitBatch({
       exportedAt: new Date().toISOString(),
       cards: state.cards
     }), state.cards.length);
     clearSubmittedBatch();
-    showOverlay('Batch stored. Event ' + receipt.eventId + ' is queued for processing. Receipt sent for ' + receipt.cardCount + ' cards.', '');
+    const statusText = receipt.status === 'queued'
+      ? ' is queued for processing.'
+      : ' is waiting for processing.';
+    const emailText = receipt.receiptEmail === 'pending'
+      ? ' Email receipt is pending.'
+      : ' Receipt sent for ' + receipt.cardCount + ' cards.';
+    showOverlay('Batch stored safely. Event ' + receipt.eventId + statusText + emailText, '');
   } catch (err) {
     alert('Submit failed: ' + err.message);
   }
@@ -473,7 +502,7 @@ document.getElementById('reset-btn').addEventListener('click', () => {
     alert('Nothing to reset.');
     return;
   }
-  const msg = 'Clear ' + state.cards.length + ' saved cards from this device? (Photos already on ImgBB stay safe. Export first if you want a copy.)';
+  const msg = 'Clear ' + state.cards.length + ' saved cards from this device? (Photos already on ImgBB stay safe. Submit first if you want the batch stored.)';
   if (confirm(msg)) {
     clearSubmittedBatch();
     render();
