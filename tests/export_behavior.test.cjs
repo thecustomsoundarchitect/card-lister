@@ -7,11 +7,24 @@ const vm = require('node:vm');
 const html = fs.readFileSync(path.join(__dirname, '..', 'index.html'), 'utf8');
 const scripts = [...html.matchAll(/<script>([\s\S]*?)<\/script>/g)].map((match) => match[1]);
 
-function buildHarness({ responseOk, responseBody = { eventId: 'event-123', cardCount: 2, status: 'queued' } }) {
+test('the primary batch action is labelled Submit', () => {
+  assert.match(html, /<button id="export-btn">Submit<\/button>/);
+  assert.doesNotMatch(html, /Tell Claude|Export to URL/);
+});
+
+test('phone source contains no service credentials', () => {
+  assert.doesNotMatch(html, /X-Master-Key|JSONBIN_KEY|IMGBB_KEY/);
+});
+
+function buildHarness({
+  responseOk,
+  responseBody = { eventId: 'event-123', cardCount: 2, status: 'queued' },
+  connection = { baseUrl: 'https://worker.example.test', token: 'phone secret' }
+}) {
   const listeners = new Map();
   const elements = new Map();
   const alerts = [];
-  const requestBodies = [];
+  const requests = [];
   let dateSequence = 0;
 
   class SequenceDate extends Date {
@@ -35,6 +48,9 @@ function buildHarness({ responseOk, responseBody = { eventId: 'event-123', cardC
   };
 
   const storage = new Map([['cardLister.v1', JSON.stringify(initialState)]]);
+  if (connection) {
+    storage.set('cardLister.connection.v1', JSON.stringify(connection));
+  }
 
   function element(id) {
     if (!elements.has(id)) {
@@ -75,8 +91,12 @@ function buildHarness({ responseOk, responseBody = { eventId: 'event-123', cardC
       getElementById: element
     },
     Date: SequenceDate,
-    fetch: async (_url, options) => {
-      requestBodies.push(JSON.parse(options.body));
+    fetch: async (url, options) => {
+      requests.push({
+        url,
+        headers: options.headers,
+        body: JSON.parse(options.body)
+      });
       return {
         ok: responseOk,
         status: 503,
@@ -109,7 +129,7 @@ function buildHarness({ responseOk, responseBody = { eventId: 'event-123', cardC
     done: listeners.get('done-btn:click'),
     elements,
     export: listeners.get('export-btn:click'),
-    getRequestBodies: () => requestBodies,
+    getRequests: () => requests,
     setCurrentPhotos(photos) {
       context.__nextPhotos = photos;
       vm.runInContext('state.current = { photos: __nextPhotos }; save();', context);
@@ -123,7 +143,10 @@ test('successful export clears the submitted batch after sending it', async () =
 
   await harness.export();
 
-  assert.equal(harness.getRequestBodies()[0].cards.length, 2);
+  const request = harness.getRequests()[0];
+  assert.equal(request.url, 'https://worker.example.test/v1/submissions');
+  assert.equal(request.headers.Authorization, 'Bearer phone secret');
+  assert.equal(request.body.cards.length, 2);
   assert.deepEqual(harness.getSavedState(), {
     batch: 'A12',
     cards: [],
@@ -131,11 +154,27 @@ test('successful export clears the submitted batch after sending it', async () =
   });
   assert.equal(
     harness.elements.get('overlay-msg').textContent,
-    'Batch stored. Event event-123 is queued for processing. Receipt sent for 2 cards.'
+    'Batch stored safely. Event event-123 is queued for processing. Receipt sent for 2 cards.'
   );
 });
 
-test('successful export requires a queued event receipt before clearing', async () => {
+test('stored receipt clears the batch and reports durable storage', async () => {
+  const harness = buildHarness({
+    responseOk: true,
+    responseBody: { eventId: 'event-123', cardCount: 2, status: 'stored' }
+  });
+
+  await harness.export();
+
+  assert.equal(harness.getSavedState().cards.length, 0);
+  assert.equal(harness.getSavedState().current.photos.length, 0);
+  assert.equal(
+    harness.elements.get('overlay-msg').textContent,
+    'Batch stored safely. Event event-123 is waiting for processing. Receipt sent for 2 cards.'
+  );
+});
+
+test('malformed stored receipt preserves every card and photograph', async () => {
   const harness = buildHarness({ responseOk: true, responseBody: { status: 'stored' } });
 
   await harness.export();
@@ -143,6 +182,23 @@ test('successful export requires a queued event receipt before clearing', async 
   assert.equal(harness.getSavedState().cards.length, 2);
   assert.equal(harness.getSavedState().current.photos.length, 1);
   assert.match(harness.alerts[0], /Submit failed: Invalid submit receipt/);
+});
+
+test('stored batch reports a pending email without restoring cleared cards', async () => {
+  const harness = buildHarness({
+    responseOk: true,
+    responseBody: {
+      eventId: 'event-123',
+      cardCount: 2,
+      status: 'queued',
+      receiptEmail: 'pending'
+    }
+  });
+
+  await harness.export();
+
+  assert.equal(harness.getSavedState().cards.length, 0);
+  assert.match(harness.elements.get('overlay-msg').textContent, /Email receipt is pending/);
 });
 
 test('the next submitted batch contains only its new cards and a new export time', async () => {
@@ -156,7 +212,9 @@ test('the next submitted batch contains only its new cards and a new export time
   harness.done();
   await harness.export();
 
-  const [firstBatch, secondBatch] = harness.getRequestBodies();
+  const [firstRequest, secondRequest] = harness.getRequests();
+  const firstBatch = firstRequest.body;
+  const secondBatch = secondRequest.body;
   assert.notEqual(firstBatch.exportedAt, secondBatch.exportedAt);
   assert.equal(secondBatch.cards.length, 1);
   assert.equal(secondBatch.cards[0].id, 1);
@@ -171,4 +229,15 @@ test('failed export preserves every saved card and photograph', async () => {
   assert.equal(harness.getSavedState().cards.length, 2);
   assert.equal(harness.getSavedState().current.photos.length, 1);
   assert.match(harness.alerts[0], /^Submit failed:/);
+});
+
+test('missing secure connection preserves every saved card and photograph', async () => {
+  const harness = buildHarness({ responseOk: true, connection: null });
+
+  await harness.export();
+
+  assert.equal(harness.getSavedState().cards.length, 2);
+  assert.equal(harness.getSavedState().current.photos.length, 1);
+  assert.match(harness.alerts[0], /Phone connection is not configured/);
+  assert.equal(harness.getRequests().length, 0);
 });
